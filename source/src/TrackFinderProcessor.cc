@@ -40,7 +40,6 @@
 // root includes
 #include <TEveArrow.h>
 
-#include <valgrind/memcheck.h>
 
 TrackFinderProcessor aTrackFinderProcessor;
 
@@ -135,7 +134,6 @@ TrackFinderProcessor::~TrackFinderProcessor() {}
 void TrackFinderProcessor::init() {
 
 	monitoring = BaboonMonitoring::GetInstance();
-	VALGRIND_DO_QUICK_LEAK_CHECK;
 	detectorManager = DetectorManager::GetInstance();
 	clusteringManager = ClusteringManager::GetInstance();
 	coreManager = CoreManager::GetInstance();
@@ -260,14 +258,12 @@ void TrackFinderProcessor::processEvent( EVENT::LCEvent * evt ) {
 		return;
 	}
 
-//	VALGRIND_DO_QUICK_LEAK_CHECK;
 	if( algorithmManager->AlgorithmIsRegistered("TrackFinderAlgorithm") ) {
 
 		TrackFinderAlgorithm *trackFinderAlgo = ( TrackFinderAlgorithm * ) algorithmManager->GetAlgorithm("TrackFinderAlgorithm");
 		trackFinderAlgo->SetCalorimeter( sdhcal );
 		trackFinderAlgo->Process();
 	}
-//	VALGRIND_DO_QUICK_LEAK_CHECK;
 
 	//--------------------------------------------------------------------------------------------------------------
 	// Keep all the clusters that can be contained in tracks
@@ -718,7 +714,6 @@ void TrackFinderProcessor::check( LCEvent *evt ) {
 void TrackFinderProcessor::end() {
 
 	analysisManager->End();
-	VALGRIND_DO_ADDED_LEAK_CHECK;
 }
 
 
