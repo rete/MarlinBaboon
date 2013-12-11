@@ -26,6 +26,7 @@
 #include "Algorithm/Calorimetry/IsolationTaggingAlgorithm.hh"
 #include "Algorithm/Calorimetry/ConnectorClusteringAlgorithm.hh"
 #include "Algorithm/Calorimetry/DensityClusteringAlgorithm.hh"
+#include "Algorithm/Calorimetry/IsolatedHitMergingAlgorithm.hh"
 #include "Algorithm/EventPreparation.hh"
 
 // marlin includes
@@ -158,14 +159,11 @@ void ShowerAgglomerationProcessor::init() {
 //	// Add clustering algorithm
 	BABOON_THROW_RESULT_IF( BABOON_SUCCESS() , != , algorithmManager->RegisterAlgorithm( new ClusteringAlgorithm() ) );
 
-	// Add density clustering algorithm
-//	BABOON_THROW_RESULT_IF( BABOON_SUCCESS() , != , algorithmManager->RegisterAlgorithm( new DensityClusteringAlgorithm() ) );
+	// Add connector clustering algorithm
+	BABOON_THROW_RESULT_IF( BABOON_SUCCESS() , != , algorithmManager->RegisterAlgorithm( new ConnectorClusteringAlgorithm() ) );
 
-	// Add core finder algorithm
-	BABOON_THROW_RESULT_IF( BABOON_SUCCESS() , != , algorithmManager->RegisterAlgorithm( new CoreFinderAlgorithm() ) );
-
-	// Add core finder algorithm
-//	BABOON_THROW_RESULT_IF( BABOON_SUCCESS() , != , algorithmManager->RegisterAlgorithm( new ConnectorClusteringAlgorithm() ) );
+	// Add isolated hit merging algorithm
+	BABOON_THROW_RESULT_IF( BABOON_SUCCESS() , != , algorithmManager->RegisterAlgorithm( new IsolatedHitMergingAlgorithm() ) );
 
 	// Add event preparation
 	BABOON_THROW_RESULT_IF( BABOON_SUCCESS() , != , algorithmManager->RegisterAlgorithm( new EventPreparation() ) );
@@ -221,14 +219,6 @@ void ShowerAgglomerationProcessor::processEvent( EVENT::LCEvent * evt ) {
 		isolAlgo->Process();
 	}
 
-//	// if no clusters, do not run...
-//	if( clusterCollection2D->empty() ) {
-//
-//		this->ClearContent();
-//		delete clusterCollection2D;
-//		return;
-//	}
-
 	if( algorithmManager->AlgorithmIsRegistered("TrackFinderAlgorithm") && !clusterCollection2D->empty() ) {
 
 		TrackFinderAlgorithm *trackFinderAlgo = ( TrackFinderAlgorithm * ) algorithmManager->GetAlgorithm("TrackFinderAlgorithm");
@@ -243,43 +233,20 @@ void ShowerAgglomerationProcessor::processEvent( EVENT::LCEvent * evt ) {
 		connectorClustAlgo->Process();
 	}
 
-	if( algorithmManager->AlgorithmIsRegistered("CoreFinderAlgorithm") ) {
+	if( algorithmManager->AlgorithmIsRegistered("IsolatedHitMergingAlgorithm") ) {
 
-		CoreFinderAlgorithm *coreFinder = ( CoreFinderAlgorithm * ) algorithmManager->GetAlgorithm("CoreFinderAlgorithm");
-		coreFinder->SetCalorimeter( sdhcal );
-		coreFinder->Process();
+		IsolatedHitMergingAlgorithm *isolatedMerging = (IsolatedHitMergingAlgorithm*) algorithmManager->GetAlgorithm("IsolatedHitMergingAlgorithm");
+		isolatedMerging->SetCalorimeter( sdhcal );
+		isolatedMerging->Process();
 	}
 
 
-	if( algorithmManager->AlgorithmIsRegistered("DensityClusteringAlgorithm") ) {
+	// Analysis part
 
-		cout << "DensityClusteringAlgorithm run !" << endl;
-		DensityClusteringAlgorithm *densityClustAlgo = ( DensityClusteringAlgorithm * ) algorithmManager->GetAlgorithm("DensityClusteringAlgorithm");
-		densityClustAlgo->SetCalorimeter( sdhcal );
-		densityClustAlgo->Process();
+	if( !rootOutputFile.empty() ) {
 
-		ClusterCollection *clusters3D = clusteringManager->GetCluster3D();
-		IntVector clusterSizes;
+		ClusterCollection *pfo = clusteringManager->GetCluster3D();
 
-		for( unsigned int cl=0 ; cl<clusters3D->size() ; cl++ )
-			clusterSizes.push_back( clusters3D->at(cl)->Size() );
-
-		analysisManager->Set( "DensityClustering" , "nbOfClusters" , (int)clusters3D->size() );
-		analysisManager->Set( "DensityClustering" , "clusterSizes" , &clusterSizes );
-		analysisManager->Fill( "DensityClustering" );
-	}
-
-
-
-	for( unsigned int h=0 ; h<caloHitCollection->size() ; h++ ) {
-
-		CaloHit *caloHit = caloHitCollection->at( h );
-
-		if( caloHit->GetTag() == IsolatedTag() )
-			caloHit->SetColor( -1 );
-
-		if( caloHit->GetTag() == TrackTag() )
-			caloHit->SetColor( kRed );
 
 	}
 
@@ -368,283 +335,5 @@ baboon::Return ShowerAgglomerationProcessor::ClearContent() {
 
 	return BABOON_SUCCESS();
 
-}
-
-
-
-baboon::Return ShowerAgglomerationProcessor::GetCaloHitDensity( CaloHit *caloHit , double &density ) {
-
-	BABOON_CHECK_POINTER( caloHit );
-
-	int total = 0;
-	int sum = 0;
-
-	IntVector ijk = caloHit->GetIJK();
-
-	for( int i=-1 ; i<=1 ; i++ ) {
-		for( int j=-1 ; j<=1 ; j++ ) {
-			for( int k=-1 ; k<=1 ; k++ ) {
-
-				total++;
-
-				if( !sdhcal->IsPadFired( ijk.at(0)+i , ijk.at(1)+j , ijk.at(2)+k ) )
-					continue;
-
-				CaloHit *h = sdhcal->GetCaloHitAt( ijk.at(0)+i , ijk.at(1)+j , ijk.at(2)+k );
-
-				int factor = 1;
-				factor *= h->GetThreshold();
-				sum += factor;
-			}
-		}
-	}
-	if( total != 0 )
-		density = double(sum) / total;
-	else density = 0;
-
-	return BABOON_SUCCESS();
-}
-/*
-
-void ShowerAgglomerationProcessor::BuildShowersFromDistances() {
-
-	ClusterCollection *clusterCollection2D = new ClusterCollection();
-	CaloHitCollection *caloHitCollection = sdhcal->GetCaloHitCollection();
-
-	// order calo hit by layer. Very useful...
-	map<unsigned int,CaloHitCollection*> orderedCaloHitCollection;
-
-	for( unsigned int h=0 ; h<caloHitCollection->size() ; h++ ) {
-
-		unsigned int layer = caloHitCollection->at(h)->GetIJK().at(2);
-
-		if( orderedCaloHitCollection.find(layer) == orderedCaloHitCollection.end() )
-			orderedCaloHitCollection[ layer ] = new CaloHitCollection();
-		orderedCaloHitCollection[ layer ]->push_back( caloHitCollection->at(h) );
-	}
-
-	// Find 2D clusters
-	if( algorithmManager->AlgorithmIsRegistered("ClusteringAlgorithm") ) {
-
-		ClusteringAlgorithm *clustAlgo = ( ClusteringAlgorithm * ) algorithmManager->GetAlgorithm("ClusteringAlgorithm");
-		clustAlgo->SetClusteringMode( fClustering2D );
-		clustAlgo->SetCalorimeter( sdhcal );
-		clustAlgo->SetClusterCollection( clusterCollection2D );
-		clustAlgo->Process();
-
-		// Register them to the clustering manager just for memory management...
-		for( unsigned int i=0 ; i<clusterCollection2D->size() ; i++ ) {
-			BABOON_THROW_RESULT_IF( BABOON_SUCCESS() , != , clusteringManager->AddCluster( clusterCollection2D->at(i) ) );
-		}
-	}
-
-	clusterCollection2D->clear();
-	delete clusterCollection2D;
-
-	// Find the isolated hits in sdhcal
-	if( algorithmManager->AlgorithmIsRegistered("IsolationTaggingAlgorithm") ) {
-
-		IsolationTaggingAlgorithm *isolAlgo = ( IsolationTaggingAlgorithm * ) algorithmManager->GetAlgorithm("IsolationTaggingAlgorithm");
-		isolAlgo->SetCalorimeter( sdhcal );
-		isolAlgo->Process();
-	}
-
-	CaloHitCollection *currentCaloHitCollection = sdhcal->GetCaloHitCollection();
-	unsigned int nbOfLayers = sdhcal->GetNbOfLayers();
-	double cellSize0 = sdhcal->GetCellSize0();
-	double cellSize1 = sdhcal->GetCellSize1();
-	double layerThickness = sdhcal->GetLayerThickness();
-	double absorberThickness = sdhcal->GetAbsorberThickness();
-	int repeatX = sdhcal->GetRepeatX();
-	int repeatY = sdhcal->GetRepeatY();
-
-	double shiftXFactor = cellSize0*repeatX / 2.0;
-	double shiftYFactor = cellSize1*repeatY / 2.0;
-	double shiftZFactor = absorberThickness + ( layerThickness - absorberThickness ) / 2.0 ;
-
-	cout << "cellSize0 : " << cellSize0 << endl;
-	cout << "cellSize1 : " << cellSize1 << endl;
-	cout << "layerThickness : " << layerThickness << endl;
-	cout << "nbOfLayers : " << nbOfLayers << endl;
-	cout << "nbOfHits : " << currentCaloHitCollection->size() << endl;
-
-	ConnectedHitsCollection *connectedHitsCollection = new ConnectedHitsCollection();
-	bool first = true;
-
-	double maxDistance = 50.0;
-	double maxDistanceX = 4*cellSize0;
-	double maxDistanceY = 4*cellSize1;
-	double maxDistanceZ = 2.1*layerThickness;
-
-	map<unsigned int,CaloHitCollection*>::iterator it;
-
-	for( it=orderedCaloHitCollection.begin() ; it!=orderedCaloHitCollection.end() ; it++ ) {
-
-		CaloHitCollection *currentCaloHitCollection = it->second;
-		unsigned int currentLayer = it->first;
-
-		for( unsigned int h1=0 ; h1<currentCaloHitCollection->size() ; h1++ ) {
-
-			CaloHit *caloHit1 = currentCaloHitCollection->at( h1 );
-			ConnectedHits *connectedHits = new ConnectedHits();
-			connectedHits->otherHits = new CaloHitCollection();
-			connectedHits->theHit = caloHit1;
-			IntVector ijk1 = caloHit1->GetIJK();
-
-			unsigned int nextLayer = it->first+1;
-
-			while( 1 ) {
-
-				map<unsigned int,CaloHitCollection*>::iterator nextIt = orderedCaloHitCollection.find( nextLayer );
-
-				if( nextIt == orderedCaloHitCollection.end() ) {
-
-					if( abs(currentLayer-nextLayer) > 2 )
-						break;
-					else {
-						nextLayer++;
-					}
-				}
-				else {
-					CaloHitCollection *nextCaloHitCollection = nextIt->second;
-
-					for( unsigned int h2=0 ; h2<nextCaloHitCollection->size() ; h2++ ) {
-
-						CaloHit *caloHit2 = nextCaloHitCollection->at( h2 );
-						IntVector ijk2 = caloHit2->GetIJK();
-
-						if( abs( cellSize0*ijk1.at(0)-cellSize0*ijk2.at(0) ) > maxDistanceX
-						 || abs( cellSize1*ijk1.at(1)-cellSize1*ijk2.at(1) ) > maxDistanceY )
-//						 || abs( layerThickness*ijk1.at(2)-layerThickness*ijk2.at(2) ) > maxDistanceZ )
-							continue;
-
-						double distance = sqrt( (cellSize0*ijk1.at(0)-cellSize0*ijk2.at(0) )*(cellSize0*ijk1.at(0)-cellSize0*ijk2.at(0))
-											   + (cellSize1*ijk1.at(1)-cellSize1*ijk2.at(1))*(cellSize1*ijk1.at(1)-cellSize1*ijk2.at(1))
-											   + (layerThickness*ijk1.at(2)-layerThickness*ijk2.at(2))*(layerThickness*ijk1.at(2)-layerThickness*ijk2.at(2)) );
-
-						connectedHits->otherHits->push_back( caloHit2 );
-						connectedHits->distances.push_back( distance );
-						connectedHits->distanceToCaloHitMap[ distance ] = caloHit2;
-					}
-
-					if( connectedHits->distanceToCaloHitMap.size() > 3 ) {
-
-						connectedHits->otherHits->clear();
-						map<double,CaloHit*>::iterator it;
-						int counter = 0;
-						for( it=connectedHits->distanceToCaloHitMap.begin()
-								; it!=connectedHits->distanceToCaloHitMap.end()
-								; it++ ) {
-							if( counter < 3 )
-								connectedHits->otherHits->push_back( it->second );
-							else {
-								connectedHits->distanceToCaloHitMap.erase( connectedHits->distanceToCaloHitMap.begin() + counter );
-							}
-
-						}
-
-
-					}
-
-
-					break;
-				}
-
-			}
-		}
-	}
-
-
-	/************************************************/
-
-
-
-/*
-	for( unsigned int h1=0 ; h1<currentCaloHitCollection->size() ; h1++ ) {
-
-		CaloHit *caloHit1 = currentCaloHitCollection->at( h1 );
-
-		IntVector ijk1 = caloHit1->GetIJK();
-		ConnectedHits *connectedHits = new ConnectedHits();
-		connectedHits->otherHits = new CaloHitCollection();
-		connectedHits->theHit = caloHit1;
-
-		for( unsigned int h2=0 ; h2<currentCaloHitCollection->size() ; h2++ ) {
-
-			// no double counting
-			if( h1 == h2 )
-				continue;
-
-			CaloHit *caloHit2 = currentCaloHitCollection->at( h2 );
-
-			IntVector ijk2 = caloHit2->GetIJK();
-
-			if( ijk1.at(2) >= ijk2.at(2) )
-				continue;
-
-			double distance = sqrt( (cellSize0*ijk1.at(0)-cellSize0*ijk2.at(0) )*(cellSize0*ijk1.at(0)-cellSize0*ijk2.at(0))
-								   + (cellSize1*ijk1.at(1)-cellSize1*ijk2.at(1))*(cellSize1*ijk1.at(1)-cellSize1*ijk2.at(1))
-								   + (layerThickness*ijk1.at(2)-layerThickness*ijk2.at(2))*(layerThickness*ijk1.at(2)-layerThickness*ijk2.at(2)) );
-
-			if( abs( cellSize0*ijk1.at(0)-cellSize0*ijk2.at(0) ) > maxDistanceX
-			 || abs( cellSize1*ijk1.at(1)-cellSize1*ijk2.at(1) ) > maxDistanceY
-			 || abs( layerThickness*ijk1.at(2)-layerThickness*ijk2.at(2) ) > maxDistanceZ )
-				continue;
-
-			connectedHits->otherHits->push_back( caloHit2 );
-			connectedHits->distances.push_back( distance );
-
-			if( enableMonitoring && gEve ) {
-				TEveArrow *connectionArrow = new TEveArrow( cellSize0*ijk2.at(0)-cellSize0*ijk1.at(0)
-														  , cellSize1*ijk2.at(1)-cellSize1*ijk1.at(1)
-														  , layerThickness*ijk2.at(2)-layerThickness*ijk1.at(2)
-														  , cellSize0*ijk1.at(0) - shiftXFactor
-														  , cellSize1*ijk1.at(1) - shiftYFactor
-														  , layerThickness*ijk1.at(2) + shiftZFactor );
-
-				connectionArrow->SetMainColor( kOrange );
-				connectionArrow->SetPickable( true );
-				monitoring->AddElement( connectionArrow );
-
-			}
-		}
-		connectedHitsCollection->push_back( connectedHits );
-	}
-	/
-
-//	BABOON_THROW_RESULT_IF( BABOON_SUCCESS() , != , this->KeepGoodConnectors( connectedHitsCollection ) );
-
-	for( unsigned int i=0 ; i<connectedHitsCollection->size() ; i++ )
-		if( connectedHitsCollection->at(i) != 0 ) {
-			connectedHitsCollection->at(i)->otherHits->clear();
-			delete connectedHitsCollection->at(i)->otherHits;
-			delete connectedHitsCollection->at(i);
-		}
-	delete connectedHitsCollection;
-	connectedHitsCollection = 0;
-}
-*/
-
-Return ShowerAgglomerationProcessor::KeepGoodConnectors( ConnectedHitsCollection *connectedHitsCollection ) {
-
-	BABOON_CHECK_POINTER( connectedHitsCollection );
-
-	for( unsigned int c=0 ; c<connectedHitsCollection->size() ; c++ ) {
-
-		ConnectedHits *connectedHits = connectedHitsCollection->at( c );
-
-		// if no or one connection, continue
-		if( connectedHits->otherHits->empty() || connectedHits->otherHits->size() == 1 )
-			continue;
-
-		CaloHitCollection *otherHits = connectedHits->otherHits;
-
-		for( unsigned int h=0 ; h<otherHits->size() ; h++ ) {
-
-		}
-
-	}
-
-	return BABOON_SUCCESS();
 }
 

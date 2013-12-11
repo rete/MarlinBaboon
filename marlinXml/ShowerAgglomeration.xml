@@ -13,8 +13,7 @@
 
 	<global>
 		<parameter name="LCIOInputFiles">
-		/home/remi/ilcsoft/SDHCAL/MarlinBaboon/double_calorimeterhit_pi-_10GeV_charged_30GeV_charged_I0_I1_overlay_5pads.slcio
-		/home/remi/ilcsoft/SDHCAL/MarlinBaboon/double_calorimeterhit_pi-_10_30GeV_new_I0_1_overlay_10pads.slcio
+		/home/remi/ilcsoft/SDHCAL/MarlinBaboon/double_calorimeterhit_pi-_10GeV_charged_30GeV_charged_I0_I1_overlay_10pads.slcio
 		/home/remi/ilcsoft/SDHCAL/data/simulation/overlay/pi-/pi_10_20GeV_new_I0_1_overlay_10pads.slcio
 		</parameter>
 		<!-- limit the number of processed records (run+evt): -->  
