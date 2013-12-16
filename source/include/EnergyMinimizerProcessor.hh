@@ -35,13 +35,109 @@
 #include "Managers/CoreManager.hh"
 #include "Managers/ShowerManager.hh"
 #include "Managers/TrackManager.hh"
-#include "Reconstruction/EnergyMinimizer.hh"
 
 #include "Detector/SDHCAL.hh"
 
 #include "Utilities/Globals.hh"
 #include "Utilities/Internal.hh"
 
+#include "TFitter.h"
+
+
+/**
+ * @brief  EnergyMinimizer class
+ */
+class EnergyMinimizer {
+
+public:
+
+	/**
+	 * @brief Parameter class
+	 */
+	struct FitterParameter {
+
+		FitterParameter()
+			: name("")
+			, variable(0.0)
+			, error(0.0)
+			, lowerValue(0.0)
+			, upperValue(0.0) {}
+
+		std::string name;
+		double variable;
+		double error;
+		double lowerValue;
+		double upperValue;
+	};
+
+	/**
+	 * @brief  Constructor
+	 */
+	EnergyMinimizer();
+
+	/**
+	 * @brief  Destructor
+	 */
+	~EnergyMinimizer();
+
+	/**
+	 * @brief
+	 */
+	void SetMinimizerType( const std::string &type );
+
+	/**
+	 * @brief
+	 */
+	void Minimize();
+
+	/**
+	 * @brief
+	 */
+	void AddParameter( const FitterParameter &param );
+
+	/**
+	 * @brief
+	 */
+	void SetPrintOutLevel( double level );
+
+	/**
+	 * @brief
+	 */
+	void SetFunction( void (*func) (int& nDim , double* gout , double& result , double par[] , int flg) );
+
+	/**
+	 * @brief
+	 */
+	void SetNumberOfIteration( int nbOfIt );
+
+	/**
+	 * @brief
+	 */
+	const std::vector<FitterParameter> &GetInputParameters();
+
+	/**
+	 * @brief
+	 */
+	const std::vector<FitterParameter> &GetOutputParameters();
+
+protected:
+
+	static EnergyMinimizer* instance;     ///< The unique instance of the class
+	std::string minimizerType;
+	std::vector< FitterParameter > parameterList;
+	std::vector< FitterParameter > outputParameterList;
+	TFitter *fitter;
+	void (*function)( int& nDim , double* gout , double& result , double par[] , int flg );
+	int numberOfIteration;
+	std::vector<std::string> availableMinimizerTypes;
+
+
+	/**
+	 * @brief Check the parameters before minimization
+	 */
+	bool Check();
+
+};  // class
 
 
 /**
@@ -127,7 +223,7 @@ class EnergyMinimizerProcessor : public marlin::Processor {
 		baboon::CoreManager *coreManager;
 		baboon::ShowerManager *showerManager;
 		baboon::TrackManager *trackManager;
-		baboon::EnergyMinimizer *minimizer;
+		EnergyMinimizer *minimizer;
 
 		// processor parameters
 		std::string algorithmConfigFileName;
@@ -141,6 +237,8 @@ class EnergyMinimizerProcessor : public marlin::Processor {
 		int printOutLevel;
 		std::string minimizerType;
 		int nbOfIterations;
+		int nbOfEnergyParameters;
+		std::vector<double> energyParameters;
 
 		typedef std::vector<double> MinimizationVariable;
 		static std::vector< MinimizationVariable > variables;

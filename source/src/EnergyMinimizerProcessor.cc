@@ -42,14 +42,162 @@
 // root includes
 //#include <TEveArrow.h>
 
-EnergyMinimizerProcessor aEnergyMinimizerProcessor;
-
 using namespace std;
 using namespace baboon;
 using namespace cfgparser;
 using namespace EVENT;
 using namespace marlin;
 
+EnergyMinimizer::EnergyMinimizer() {
+
+	minimizerType = "SIMPLEX";
+	fitter = new TFitter();
+
+	availableMinimizerTypes.push_back( "SIMPLEX" );
+	availableMinimizerTypes.push_back( "MINUIT" );
+	numberOfIteration = 3;
+}
+
+
+EnergyMinimizer::~EnergyMinimizer() {
+
+	delete fitter;
+}
+
+
+
+void EnergyMinimizer::SetMinimizerType( const std::string &type ) {
+
+	minimizerType = type;
+}
+
+
+void EnergyMinimizer::AddParameter( const EnergyMinimizer::FitterParameter &param ) {
+
+	bool found = false;
+	for( unsigned int i=0 ; i<parameterList.size() ; i++ ) {
+		if( parameterList.at(i).name == param.name ) {
+			found = true;
+			break;
+		}
+	}
+
+	if( found )
+		throw baboon::Exception( "EnergyMinimizer::AddParameter() : param name was already present" );
+
+	// C++ 11 not available
+
+//		auto it = std::find_if( parameterList.begin() , parameterList.end()
+//				, [&]( FitterParameter &p ) -> bool { return (param.name == p.name); } );
+//		if( it != parameterList.end() )
+//			throw Exception( "EnergyMinimizer::AddParameter() : param name was already present" );
+
+	parameterList.push_back( param );
+}
+
+void EnergyMinimizer::SetPrintOutLevel( double level ) {
+
+	fitter->ExecuteCommand("SET PRINTOUT", &level , 1 );
+}
+
+
+
+void EnergyMinimizer::SetFunction( void (*func) (int& nDim , double* gout , double& result , double par[] , int flg) ) {
+
+	if( func == nullptr )
+		throw baboon::Exception( "EnergyMinimizer::SetFunction : function is a nullptr" );
+
+	function = func;
+}
+
+
+void EnergyMinimizer::SetNumberOfIteration( int nbOfIt ) {
+
+	if( nbOfIt > 0 )
+		numberOfIteration = nbOfIt;
+}
+
+
+const std::vector<EnergyMinimizer::FitterParameter> &EnergyMinimizer::GetInputParameters() {
+
+	return parameterList;
+}
+
+
+const std::vector<EnergyMinimizer::FitterParameter> &EnergyMinimizer::GetOutputParameters() {
+
+	return outputParameterList;
+}
+
+void EnergyMinimizer::Minimize() {
+
+	if( !Check() )
+		throw baboon::Exception( "EnergyMinimizer::Minimize() : Couldn't minimize , parameter error" );
+
+	fitter->SetFCN( function );
+
+	outputParameterList.clear();
+	outputParameterList = parameterList;
+	std::vector< FitterParameter > tryParamsTemp = parameterList;
+	std::vector< FitterParameter > newParamsTemp = parameterList;
+
+	double min = 0.0;
+	double *paramDouble = new double[ parameterList.size() ];
+
+	for( int p=0 ; p<parameterList.size() ; p++ )
+		paramDouble[p] = parameterList.at( p ).variable;
+
+	int junk = 0;
+	function( junk , nullptr , min , paramDouble , 0 );
+
+
+	for( unsigned int it=0 ; it<numberOfIteration ; it++ ) {
+
+		for( int p=0 ; p<tryParamsTemp.size() ; p++ ) {
+
+			FitterParameter &param = tryParamsTemp.at(p);
+			fitter->SetParameter( p , param.name.c_str() , param.variable , param.error , param.lowerValue , param.upperValue );
+		}
+
+		// Fitter call
+		fitter->ExecuteCommand( minimizerType.c_str() , 0 , 0 );
+
+		// Grab the output from the fitter ...
+		for( int p=0 ; p<outputParameterList.size() ; p++ )
+			paramDouble[p] = fitter->GetParameter( p );
+
+		double newMin = 0.0;
+		function( junk , nullptr , newMin , paramDouble , 0 );
+
+		// ... and compare it with the previous minimization
+		if( newMin < min ) {
+
+			min = newMin;
+
+			for( int p=0 ; p<outputParameterList.size() ; p++ )
+				outputParameterList.at(p).variable = fitter->GetParameter( p );
+		}
+
+		tryParamsTemp = newParamsTemp;
+	}
+
+}
+
+
+bool EnergyMinimizer::Check() {
+
+	if( function == nullptr
+	|| numberOfIteration <=0
+	|| parameterList.empty()
+	|| std::find( availableMinimizerTypes.begin() , availableMinimizerTypes.end() , minimizerType ) == availableMinimizerTypes.end() )
+		return false;
+
+	return true;
+}
+
+// --------------------------------------------------------------------------------------------------------------------------
+
+EnergyMinimizerProcessor aEnergyMinimizerProcessor;
 
 std::vector< EnergyMinimizerProcessor::MinimizationVariable > EnergyMinimizerProcessor::variables;
 std::vector< double > EnergyMinimizerProcessor::energies;
@@ -95,6 +243,18 @@ EnergyMinimizerProcessor::EnergyMinimizerProcessor()
 				     nbOfIterations,
 				     static_cast<int> (3) );
 
+	  registerProcessorParameter("nbOfEnergyParameters" ,
+				     "the number of parameters in the energy function" ,
+				     nbOfEnergyParameters,
+				     static_cast<int> (9) );
+
+	  std::vector<double> eParams( 9 , 0.0 );
+	  registerProcessorParameter("energyParameters" ,
+				     "the input parameters in the energy function" ,
+				     energyParameters,
+				     eParams );
+
+
 	  vector<string> ijkVec;
 	  ijkVec.push_back("I");
 	  ijkVec.push_back("J");
@@ -106,8 +266,6 @@ EnergyMinimizerProcessor::EnergyMinimizerProcessor()
 				     ijkVec);
 
 	  inputEnergy = 0.0;
-
-
 }
 
 EnergyMinimizerProcessor::~EnergyMinimizerProcessor() {}
@@ -115,13 +273,17 @@ EnergyMinimizerProcessor::~EnergyMinimizerProcessor() {}
 
 void EnergyMinimizerProcessor::init() {
 
+	printParameters();
+
+	assert( energyParameters.size() != nbOfEnergyParameters );
+
 	detectorManager = DetectorManager::GetInstance();
 	clusteringManager = ClusteringManager::GetInstance();
 	coreManager = CoreManager::GetInstance();
 	showerManager = ShowerManager::GetInstance();
 	trackManager = TrackManager::GetInstance();
 	analysisManager = AnalysisManager::GetInstance();
-	minimizer = EnergyMinimizer::GetInstance();
+	minimizer = new EnergyMinimizer();
 
 	analysisManager->SetRootFileName( rootOutputFile );
 	analysisManager->Init();
@@ -240,54 +402,63 @@ void EnergyMinimizerProcessor::end() {
 
 	EnergyMinimizer::FitterParameter alpha1Param;
 	alpha1Param.name = "alpha1";
+	alpha1Param.variable = energyParameters.at(0);
 	alpha1Param.error = 0.00001;
 	alpha1Param.lowerValue = 0;
 	alpha1Param.upperValue = 0;
 
 	EnergyMinimizer::FitterParameter alpha2Param;
 	alpha2Param.name = "alpha2";
+	alpha2Param.variable = energyParameters.at(1);
 	alpha2Param.error = 0.00001;
 	alpha2Param.lowerValue = 0;
 	alpha2Param.upperValue = 0;
 
 	EnergyMinimizer::FitterParameter alpha3Param;
 	alpha3Param.name = "alpha3";
+	alpha3Param.variable = energyParameters.at(2);
 	alpha3Param.error = 0.00001;
 	alpha3Param.lowerValue = 0;
 	alpha3Param.upperValue = 0;
 
 	EnergyMinimizer::FitterParameter beta1Param;
 	beta1Param.name = "beta1";
+	beta1Param.variable = energyParameters.at(3);
 	beta1Param.error = 0.00001;
 	beta1Param.lowerValue = 0;
 	beta1Param.upperValue = 0;
 
 	EnergyMinimizer::FitterParameter beta2Param;
 	beta2Param.name = "beta2";
+	beta2Param.variable = energyParameters.at(4);
 	beta2Param.error = 0.00001;
 	beta2Param.lowerValue = 0;
 	beta2Param.upperValue = 0;
 
 	EnergyMinimizer::FitterParameter beta3Param;
 	beta3Param.name = "beta3";
+	beta3Param.variable = energyParameters.at(5);
 	beta3Param.error = 0.00001;
 	beta3Param.lowerValue = 0;
 	beta3Param.upperValue = 0;
 
 	EnergyMinimizer::FitterParameter gamma1Param;
 	gamma1Param.name = "gamma1";
+	gamma1Param.variable = energyParameters.at(6);
 	gamma1Param.error = 0.00001;
 	gamma1Param.lowerValue = 0;
 	gamma1Param.upperValue = 0;
 
 	EnergyMinimizer::FitterParameter gamma2Param;
 	gamma2Param.name = "gamma2";
+	gamma2Param.variable = energyParameters.at(7);
 	gamma2Param.error = 0.00001;
 	gamma2Param.lowerValue = 0;
 	gamma2Param.upperValue = 0;
 
 	EnergyMinimizer::FitterParameter gamma3Param;
 	gamma3Param.name = "gamma3";
+	gamma3Param.variable = energyParameters.at(8);
 	gamma3Param.error = 0.00001;
 	gamma3Param.lowerValue = 0;
 	gamma3Param.upperValue = 0;
@@ -315,6 +486,8 @@ void EnergyMinimizerProcessor::end() {
 	for( unsigned int p=0 ; p<outputParameters.size() ; p++ ) {
 		cout << "param '" << outputParameters.at(p).name << "' minimized with value " << outputParameters.at(p).variable << endl;
 	}
+
+	delete minimizer;
 
 	analysisManager->End();
 }
