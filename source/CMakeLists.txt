@@ -16,6 +16,23 @@ IF( OPENMP_FOUND )
 ENDIF()
 
 
+# --------------------- Cut Processor lib -------------------------------
+
+FILE (
+  GLOB_RECURSE
+  CutProcessor_FILES
+  include/CutProcessor.hh
+  src/CutProcessor.cc
+)
+ADD_LIBRARY( CutProcessor_lib SHARED ${CutProcessor_FILES} )
+SET_TARGET_PROPERTIES( CutProcessor_lib PROPERTIES OUTPUT_NAME CutProcessor )
+INSTALL(
+  TARGETS CutProcessor_lib
+  LIBRARY DESTINATION lib 
+)
+
+
+
 # --------------------- Shower Processor lib -------------------------------
 
 FILE (
@@ -46,30 +63,6 @@ INSTALL(
 	TARGETS ShowerSpliter_lib
 	LIBRARY DESTINATION lib 
 )
-
-FIND_LIBRARY( TSPECTRUM_LIB libSpectrum.so )
-
-
-# --------------------- Overlay Estimator lib processor -------------------------------
-
-FILE (
-	GLOB_RECURSE
-	OverlayEstimatorProcessor_FILES
-	include/OverlayEstimatorProcessor.hh
-	src/OverlayEstimatorProcessor.cc
-)
-ADD_LIBRARY( OverlayEstimator_lib SHARED ${OverlayEstimatorProcessor_FILES} )
-SET_TARGET_PROPERTIES( OverlayEstimator_lib PROPERTIES OUTPUT_NAME OverlayEstimator )
-INSTALL(
-	TARGETS OverlayEstimator_lib
-	LIBRARY DESTINATION lib 
-)
-
-TARGET_LINK_LIBRARIES( 
-	OverlayEstimator_lib 
-	${TSPECTRUM_LIB}
-)
-
 
 
 # --------------------- TestBeamCutsProcessor lib -------------------------------
