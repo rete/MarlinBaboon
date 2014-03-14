@@ -17,10 +17,14 @@
 #include "CutProcessor.hh"
 
 #include "marlin/Global.h"
+#include "marlin/VerbosityLevels.h"
 
 // lcio includes
 #include "UTIL/CellIDDecoder.h"
 #include "EVENT/CalorimeterHit.h"
+
+// std
+#include <limits>
 
 using namespace std;
 using namespace EVENT;
@@ -41,7 +45,7 @@ CutProcessor::CutProcessor()
 	registerProcessorParameter("NHitOverNLayerCut",
 				 "cut on NHit/nbOfTouchedLayers",
 				 cut2,
-				 static_cast<double> (0.2) );
+				 static_cast<double> (3) );
 
 	registerProcessorParameter("radiusOverCog2Cut",
 				 "cut on radius/cogz",
@@ -72,8 +76,6 @@ CutProcessor::CutProcessor()
 				 "cut on the percentage of hits in the edges",
 				 cut8,
 				 static_cast<double> (0.5) );
-
-
 
 	registerProcessorParameter("decoderString" ,
 				 "decoder string for cell ID decoder" ,
@@ -146,6 +148,10 @@ void CutProcessor::processEvent( EVENT::LCEvent * evt ) {
 	fractalDimension = 0.0;
 	nbOfHitsInCentralCells = 0;
 
+	NHit.clear();
+	cog.clear();
+	caloHitCollection.clear();
+
 	LCCollection *collection = 0;
 
 	try {
@@ -154,7 +160,7 @@ void CutProcessor::processEvent( EVENT::LCEvent * evt ) {
 	}
 	catch( DataNotAvailableException &e ) {
 
-		cout << "LCIO exception thrown : " << e.what() << endl;
+		streamlog_out(ERROR) << "LCIO exception thrown : " << e.what() << endl;
 		throw marlin::StopProcessingException(this);
 	}
 
@@ -166,6 +172,11 @@ void CutProcessor::processEvent( EVENT::LCEvent * evt ) {
 			throw marlin::StopProcessingException(this);
 
 		CalorimeterHit *hit = static_cast<CalorimeterHit*> ( collection->getElementAt(i) );
+		int K = cellIdDecoder(hit)[ IJKEncoding.at(2).c_str() ];
+
+		if(K > nbOfLayers - 1)
+			continue;
+
 		caloHitCollection.push_back( hit );
 	}
 
@@ -174,7 +185,10 @@ void CutProcessor::processEvent( EVENT::LCEvent * evt ) {
 
 	// first cut on NHit
 	if( caloHitCollection.size() < cut1 )
+	{
+		streamlog_out(MESSAGE) << "Skipping event - NHit cut" << std::endl;
 		throw marlin::SkipEventException(this);
+	}
 
 	int Nhit1 = 0;
 	int Nhit2 = 0;
@@ -202,15 +216,15 @@ void CutProcessor::processEvent( EVENT::LCEvent * evt ) {
 		nlayers.at( K ) ++;
 
 		// number of hits for each threshold + weight for cog computation
-		if(fThr>0.0 && fThr<1.2) {
+		if( (fThr-1.f) < std::numeric_limits<float>::epsilon() ) {
 			weight = 10.0;
 			Nhit1++;
 		}
-		else if(fThr>1.1 && fThr<2.2) {
+		else if( (fThr-2.0)< std::numeric_limits<float>::epsilon() ) {
 			weight = 5.0;
 			Nhit2++;
 		}
-		else if(fThr>2.2) {
+		else if( (fThr-3.0)< std::numeric_limits<float>::epsilon() ) {
 			weight = 1.0;
 			Nhit3++;
 		}
@@ -233,7 +247,7 @@ void CutProcessor::processEvent( EVENT::LCEvent * evt ) {
 	NHit.push_back( Nhit3 );
 
 	// debug check
-	assert( (Nhit1+Nhit2+Nhit3) != NHit.at(0) );
+	assert( (Nhit1+Nhit2+Nhit3) == NHit.at(0) );
 
 	cog.push_back( x/sumweight );
 	cog.push_back( y/sumweight );
@@ -337,25 +351,42 @@ void CutProcessor::processEvent( EVENT::LCEvent * evt ) {
 			nbOfHolesAfterStartingPoint ++;
 	}
 
-	if( (double)NHit.at(0)/(double)nbOfTouchedLayers > cut2 )
+	if( (double)NHit.at(0)/(double)nbOfTouchedLayers < cut2 )
+	{
+		streamlog_out(MESSAGE) << "Skipping event - NHit/NLayers cut" << std::endl;
 		throw marlin::SkipEventException(this);
+	}
 
-	if( radius / cog.at(2) > cut3 )
+	if( radius / cog.at(2) < cut3 )
+	{
+		streamlog_out(MESSAGE) << "Skipping event - radius/cog[2] cut" << std::endl;
 		throw marlin::SkipEventException(this);
+	}
 
 	if( showerStartingLayer < cut4 && nbOfTouchedLayers < cut5 )
+	{
+		streamlog_out(MESSAGE) << "Skipping event - startPoint && NLayer cut" << std::endl;
 		throw marlin::SkipEventException(this);
+	}
 
 	if( (fractalDimension * nbOfHitsInCentralCells ) / ( std::log( NHit.at(0) ) * NHit.at(0) ) < cut6 )
+	{
+		streamlog_out(MESSAGE) << "Skipping event - fractal dim cut" << std::endl;
 		throw marlin::SkipEventException(this);
+	}
 
-	if( nbOfHolesAfterStartingPoint < cut7 )
+	if( nbOfHolesAfterStartingPoint > cut7 )
+	{
+		streamlog_out(MESSAGE) << "Skipping event - NHoles cut" << std::endl;
 		throw marlin::SkipEventException(this);
+	}
 
 	if( nbOfHitsInEdge / NHit.at(0) > cut8 )
+	{
+		streamlog_out(MESSAGE) << "Skipping event - NEdge/NHit cut" << std::endl;
 		throw marlin::SkipEventException(this);
+	}
 
-	caloHitCollection.clear();
 }
 
 
